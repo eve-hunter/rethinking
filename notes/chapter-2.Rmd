@@ -1,0 +1,138 @@
+---
+title: "rethinking bayes - ch. 2 notes"
+output: html_notebook
+---
+
+### calculating plausibilities
+
+The counts of ways to produce the data divided by the sum of all ways to produce data provide us with the plausibilities of producing the data (p27).
+```{r}
+ways <- c( 0 , 3 , 8 , 9 , 0)
+ways / sum(ways)
+```
+
+The plausibilities are also probabilities - non-negative real numbers that sum to one.
+
+* A conjectured proportion of blue marbles, `p`, is usually called a `PARAMETER` value. It is a way of indexing possible explanations of the data.
+* The relative number of ways that a value `p` can produce the data is usually called a `LIKELIHOOD`. It is derived by enumerating all the possible data sequences that could have happened and then eliminating those sequences inconsistent with the data.
+* The prior plausibility of any specific `p` is usually called the `PRIOR PROBABILITY`.
+* The new, updated plausibility of any specific `p` is usually called the `POSTERIOR PROBABILITY`.
+
+### building a model
+
+Designing a simple Bayesian model benefits from a design loop with three steps:
+
+1. Data story: motivate the model by narrating how the data might arise.
+2. Update: educate your model by feeding it the data.
+3. Evaluate: all statistical models require supervision, leading to model revision.
+
+### components of the model
+
+1. The number of ways each conjecture can produce an observation.
+2. The accumulated number of ways each conjecture could produce the entire data.
+3. The initial plausibility of each conjectured cause of the data.
+
+`VARIABLES` are symbols that can take on different values. An unobserved variable is called a `PARAMETER` and must be inferred from other variables. The other variables in this example (p33) are `W` and `L`, the counts of water and land in the observations. The sum of these two variables is the total `N`.
+
+`LIKELIHOOD` usually means a distribution function assigned to an observed variable. We will generally just talks about distributions of variables, because `LIKELIHOOD` is a specific term outside of Bayesian statistics.
+
+Here we calculate the likelihood of the data (6 `W` in 9 tosses) using the [binomial distribution](https://www.youtube.com/watch?v=ConmIDAzRqI&ab_channel=BrandonFoltz) (p33).
+```{r}
+dbinom( 6 , size=9 , prob=0.5)
+```
+
+More on the binomial distribution function:
+?dbinom
+
+The `PRIOR` is the start-point for the model. The `SUBJECTIVE BAYESIAN` approach emphasizes choosing priors based on the personal beliefs of the analyst. In practice, the prior is chosen, evaluated, and revised like the other components of the model.
+
+We can also try lots of different priors; we're not stuck with one. If there's no strong argument for one in particular, then try lots and see how sensitive inference is to the assumption. It's just that -- an assumption.
+
+The model we've been laying out can be summarized with the syntax `W ~ Binomial(N, p)`, which describes the assumption that the relative counts of ways to realize `W` in `N` trials with probability `p` on each trial comes from the binomial distribution. The unobserved parameter `p` is summarized with the syntax `p ~ Uniform(0,1)`, meaning that it has a flat prior over its entire possible range from 0 to 1.
+
+### making the model go 
+
+For every unique combination of data, likelihood, parameters, and prior, there is a unique `POSTERIOR DISTRIBUTION`. The distribution contains the relative plusibility of different parameter values, conditional on the data and model. It takes the form of the probability of the parameters, conditional on the data. In this case, that would be `Pr(p|W, L)`, the probability that each possible value of `p`, conditional on the specific `W` and `L` that we observed.
+
+The mathematical definition of the posterior distribution arises from `BAYES' THEOREM`. It states that the probability of any particular value of `p`, considering the data, is equal to the product of the relative plausibility of the data, conditional on `p`, and the prior plausibility of `p`, divided by the `AVERAGE PROBABILITY OF THE DATA` over the prior, described by `Pr(W, L)`. 
+
+The Bayesian model is a machine with built-in definitions for the `LIKELIHOOD`, `PARAMETERS`, and `PRIOR`. The action that conditions the prior on the data will sometimes be metaphorically referred to as the 'motor' or 'engine' in this text; it will be one of a few numerical techniques for computing posterior distributions. Grid approximation, Quadratic approximation, and Markov chain Monte Carlo (MCMC) are a few examples of these.
+
+### grid approximation
+
+`GRID APPROXIMATION` is a simple conditioning technique. We can achieve an excellent approximation of the continuous posterior distribution by considering only a finite grid of parameter values. It scales poorly with the number of parameters and is mostly value as a pedagogical tool.
+
+1. Define the grid. Decide how many points to use in estimating the posterior, then make a list of the parameter values on the grid.
+2. Compute the value of the prior at each parameter value on the grid.
+3. Compute the likelihood at each parameter value.
+4. Compute the unstandardized posterior at each parameter value by multiplying the prior by the likelihood.
+5. Standardize the posterior by dividing each value by the sum of all values.
+
+This is performed in the code below (p40).
+```{r}
+# 1. define the grid
+p_grid <- seq( from=0, to=1 , length.out=20 )
+# ?seq
+# print(p_grid)
+
+# 2. define the prior
+prior <- rep( 1 , 20 )
+# prior <- ifelse( p_grid < 0.5 , 0 , 1 )
+# prior <- exp( -5*abs( p_grid - 0.5) )
+# ?rep
+# print(prior)
+
+# compute likelihood at each value in the grid
+likelihood <- dbinom( 6 , size=9 , prob=p_grid )
+# ?dbinom
+# print(likelihood)
+
+# compute product of likelihood and prior
+unstd.posterior <- likelihood * prior
+# print(unstd.posterior)
+
+# standardize the posterior, so it sums to 1
+posterior <- unstd.posterior / sum(unstd.posterior)
+# print(posterior)
+
+# visualize the posterior distribution
+plot( p_grid , posterior , type="b" ,
+      xlab="probability of water" , ylab="posterior probability")
+```
+
+### quadratic approximation
+
+Grid approximation is all fine and well until you have 100 parameters p and must compute a grid of 100^p. That'd be expensive and untenable, but that scale is sometimes necessary. An alternative approach is `QUADRATIC APPROXIMATION`. Under general conditions, the region near the peak of the posterior distribution will be nearly `GAUSSIAN` (normal) in shape. This is convenient - the gaussian distribution can be described with just the location of its center (the mean) and its spread (the variance). This is computationally cheap and often marvelously accurate.
+
+1. Find the posterior mode. This is usually accomplished by some optimization algorithm, a procedure that virtually "climbs" the posterior distribution, as if it were a mountain. The golem doesn't know where the peak is, but it does know the slope under its feet. There are many well-developed optimization procedures, most of them more clever than simple hill climbing. But all of them try to find peaks.
+2. Once you find the peak of the posterior, you must estimate the curvature near the peak. This curvature is sufficient to compute a quadratic approximation of the entire posterior distribution. In some cases, these calculations can be done analytically, but usually your computer uses some numerical technique instead.
+
+We will use `quap`, a tool from the `rethinking` package to compute the quadratic approximation for this example. It's a flexible model fitting tool that will allow us to specify a large number of different "regression" models (p42).
+```{r}
+library(rethinking) # instantiate the library
+# ?quap
+globe.qa <- quap(
+  alist(
+    W ~ dbinom( W+L , p ) , # binomial likelihood
+    p ~ dunif(0,1) # uniform prior
+  ),
+  data=list(W=6,L=3) )
+
+# display summary of quadratic approximation
+precis ( globe.qa )
+```
+We can read the above approximation as: `assuming the posterior is gaussian, it is maximized at 0.67, and its standard deviation is 0.16.`
+
+### markov chain monte carlo (mcmc)
+
+`MARKOV CHAIN MONTE CARLO` is a chain of conditioning engine capable of handling highly complex models. It doesn't scale poorly, like grid approximation. It allows for more complex estimation than quadratic approximation. It's a beast. We'll revisit it in the second half of the book, and probably a little bit before. Until then, an implementation is available on p45.
+
+### practice questions
+
+**2E1:** the expression `Pr(rain|Monday)` corresponds to the statement `the probability of rain on Monday`
+
+**2E2:** the statement `the probability that it is Monday, given that it is raining` corresponds to the expression `Pr(Monday|rain)`
+
+**2E3:** the statement `the probability that it is Monday given that it is raining` still corresponds to the expression `Pr(Monday|rain)`
+
+**2E4:** to state that the probability of water is 0.7 is not to state an objective reality about probability itself, but to describe the estimation derived from the specific model and the set of observations fed to it. there is no 'objective' core to the process of arriving at p = 0.7, only assumptions, numbers, and subjectively chosen processes. sometimes these add up to a useful model.
